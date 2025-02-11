@@ -364,7 +364,7 @@ def TwoPointCorrelationFunction(mode, edges, data_positions1, data_positions2=No
                 size2 = counts['D1D2'].size2
             if boxsize is None:
                 raise ValueError('boxsize must be provided for analytic two-point counts {}.'.format(label12))
-            counts[label12] = AnalyticTwoPointCounter(mode, edges, boxsize, size1=size1, size2=size2)
+            counts[label12] = AnalyticTwoPointCounter(mode, edges, boxsize, size1=size1, size2=size2, selection_attrs=selection_attrs[label12])
             continue
         if log: logger.info('Computing two-point counts {}.'.format(label12))
         twopoint_kwargs = {'twopoint_weights': twopoint_weights[label12], 'weight_type': weight_type[label12], 'selection_attrs': selection_attrs[label12]}

@@ -1429,7 +1429,7 @@ class AnalyticTwoPointCounter(BaseTwoPointCounter):
     """
     name = 'analytic'
 
-    def __init__(self, mode, edges, boxsize, size1=10, size2=None, los='z'):
+    def __init__(self, mode, edges, boxsize, size1=10, size2=None, los='z', selection_attrs=None):
         r"""
         Initialize :class:`AnalyticTwoPointCounter`, and set :attr:`wcounts` and :attr:`sep`.
 
@@ -1474,17 +1474,44 @@ class AnalyticTwoPointCounter(BaseTwoPointCounter):
         self._set_default_seps()
         self._set_reversible()
         self.wnorm = self.normalization()
+        self._set_selection(selection_attrs)
         self.run()
 
     def run(self):
         """Set analytical two-point counts."""
+        if any(name != "rp" for name in self.selection_attrs.keys()):
+            raise TwoPointCounterError("Analytic random counts not implemented for selections other than rp")
+        rp_selection = self.selection_attrs.get("rp", None)
+        if rp_selection is not None and self.mode not in ['s', 'smu']:
+            raise TwoPointCounterError("Analytic random counts not implemented for rp selection with mode {}".format(self.mode))
         if self.mode == 's':
             v = 4. / 3. * np.pi * self.edges[0]**3
             dv = np.diff(v, axis=0)
+            if rp_selection:
+                v_rpcut = [4. / 3. * np.pi * (self.edges[0]**3 - np.fmax(self.edges[0]**2 - rp_cut**2, 0)**1.5) for rp_cut in rp_selection] # volume of the intersection of a cylinder with radius rp_cut and a sphere with radius s
+                v_rpcut = v_rpcut[1] - v_rpcut[0] # the volume that is removed between two rp cut limits
+                dv_rpcut = np.diff(v_rpcut, axis=0) # volume in each bin removed by rp selection
+                dv = np.where(dv_rpcut >= 1e-8 * dv, dv_rpcut, 0) # ensure that the volume is not negative and further remove small positive values that may arise due to rounding errors; assumes that dv is accurate
         elif self.mode == 'smu':
             # we bin in mu
             v = 2. / 3. * np.pi * self.edges[0][:, None]**3 * self.edges[1]
             dv = np.diff(np.diff(v, axis=0), axis=-1)
+            if rp_selection:
+                s, mu = self.edges[0][:, None], self.edges[1][None, :]
+                sin_theta = np.sqrt(1 - mu**2) * np.ones_like(s)
+                v_rpcut = []
+                for rp_cut in rp_selection:
+                    ss = s * np.ones_like(mu); c = ss * sin_theta > rp_cut; ss[c] = rp_cut / sin_theta[c] # this prevents division by zero, should work when rp_cut = 0, infinity or s = 0
+                    r = ss * sin_theta # = min(rp_cut, s * sin(theta))
+                    h = ss * mu # = cot(theta) * r, but avoids ambiguity/division by zero
+                    v_rpcut.append(2. / 3. * np.pi * (s**3 - (s**2 - r**2)**1.5 + r**2 * h + 2 * (mu > 0) * ((s**2 - r**2)**1.5 - np.fmax(s**2 - rp_cut**2, 0)**1.5))) # volume of the intersection of a cylinder with radius rp_cut and a spherical sector/cone between -1 and mu with radius s.
+                    # it can be decomposed into (1) intersection of a cylinder with the sphere, (2) a usual cylinder, (3) a usual cone and (4) only for mu>0 - intersection of the sphere with the space between two cylinders.
+                    # r is the radius of (1-3) from the line of sight; h is the height of the cylinder (2) and the cone (3).
+                    # the radii of cylinders for (4) are r and R = min(rp_cut, s), and r <= R always.
+                    # it may seem that (4) becomes a more complicated shape if r < s * sin(theta), but this can only happen if rp_cut < s * sin(theta) <= s, then r = R = rp_cut, and we obtain zero volume as it should be.
+                v_rpcut = v_rpcut[1] - v_rpcut[0] # the volume that is removed between two rp cut limits
+                dv_rpcut = np.diff(np.diff(v_rpcut, axis=0), axis=-1) # volume in each bin removed by rp selection
+                dv = np.where(dv_rpcut >= 1e-8 * dv, dv_rpcut, 0) # ensure that the volume is not negative and further remove small positive values that may arise due to rounding errors; assumes that dv is accurate
         elif self.mode == 'rppi':
             v = np.pi * self.edges[0][:, None]**2 * self.edges[1]
             dv = np.diff(np.diff(v, axis=0), axis=1)
